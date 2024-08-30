@@ -69,7 +69,6 @@
         (ok creator-id))  ;; Return the creator-id after successful update
     (err err-not-found)))
 
-
 (define-public (cancel-subscription (creator-id uint))
     (match (map-get? subscriptions { subscriber: tx-sender, creator-id: creator-id })
         subscription 
@@ -78,3 +77,17 @@
                 (ok (map-delete subscriptions { subscriber: tx-sender, creator-id: creator-id })))
         (err err-not-subscribed)))
 
+(define-public (renew-subscription (creator-id uint))
+    (match (map-get? subscriptions { subscriber: tx-sender, creator-id: creator-id })
+        subscription
+            (begin
+                ;; Check if the current block height is past the expiration
+                (if (>= block-height (get expiration subscription))
+                    (begin
+                        ;; Renew the subscription by extending the expiration
+                        (map-set subscriptions { subscriber: tx-sender, creator-id: creator-id }
+                            { expiration: (+ block-height subscription-duration) })
+                        (ok (get expiration subscription)))
+                    (err err-already-subscribed))  ;; If subscription is still active
+            )
+        (err err-not-subscribed)))
