@@ -1,4 +1,5 @@
 Decntralized content Subscription Management Smart Contract
+
 This project is a smart contract for managing subscriptions on the Stacks blockchain. It allows content creators to register themselves, set subscription fees, and manage their content. Users can subscribe to creators and manage their subscriptions securely and transparently.
 
 
