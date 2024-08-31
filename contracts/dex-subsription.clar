@@ -135,3 +135,22 @@
         (err err-not-found))
   )
 )
+
+;; Disable auto-renew for a subscription
+(define-public (disable-auto-renew (creator-id uint))
+  (begin
+    ;; Check if creator exists
+    (if (creator-exists creator-id)
+        ;; Check if subscription exists
+        (match (get-subscription tx-sender creator-id)
+          subscription
+            (begin
+              ;; Set auto-renew to false
+              (map-set subscriptions { subscriber: tx-sender, creator-id: creator-id }
+                  (merge subscription { auto-renew: false }))
+              (ok (tuple (status "auto-renew disabled") (creator-id creator-id)))
+            )
+          (err err-not-subscribed))
+        (err err-not-found))
+  )
+)
