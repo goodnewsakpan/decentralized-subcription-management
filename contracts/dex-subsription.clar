@@ -20,11 +20,14 @@
     content-hash: (string-ascii 64)
 })
 
-(define-map subscriptions { subscriber: principal, creator-id: uint } { expiration: uint })
+(define-map subscriptions { subscriber: principal, creator-id: uint } { expiration: uint, auto-renew: bool })
 
 ;; Helper functions
 (define-private (creator-exists (creator-id uint))
     (is-some (map-get? creators creator-id)))
+
+(define-private (get-subscription (subscriber principal) (creator-id uint))
+    (map-get? subscriptions { subscriber: subscriber, creator-id: creator-id }))
 
 ;; Read-only functions
 (define-read-only (get-creator-details (creator-id uint))
@@ -33,7 +36,7 @@
         (err err-not-found)))
 
 (define-read-only (get-subscription-status (subscriber principal) (creator-id uint))
-    (match (map-get? subscriptions { subscriber: subscriber, creator-id: creator-id })
+    (match (get-subscription subscriber creator-id)
         subscription (ok subscription)
         (err err-not-subscribed)))
 
@@ -60,34 +63,75 @@
             (ok new-id))))
 
 (define-public (update-content (creator-id uint) (new-content-hash (string-ascii 64)))
-  (match (map-get? creators creator-id)
-    creator 
-      (begin
-        (asserts! (is-eq (get address creator) tx-sender) (err err-owner-only))
-        (map-set creators creator-id 
-          (merge creator { content-hash: new-content-hash }))
-        (ok creator-id))  ;; Return the creator-id after successful update
-    (err err-not-found)))
+  (begin
+    ;; Check if creator exists
+    (if (creator-exists creator-id)
+        (match (map-get? creators creator-id)
+          creator 
+            (begin
+              (asserts! (is-eq (get address creator) tx-sender) (err err-owner-only))
+              (map-set creators creator-id 
+                (merge creator { content-hash: new-content-hash }))
+              (ok creator-id))  ;; Return the creator-id after successful update
+          (err err-not-found))
+        (err err-not-found)
+    )
+  )
+)
 
 (define-public (cancel-subscription (creator-id uint))
-    (match (map-get? subscriptions { subscriber: tx-sender, creator-id: creator-id })
-        subscription 
+  (begin
+    ;; Check if creator exists
+    (if (creator-exists creator-id)
+        ;; Check if subscription exists
+        (match (get-subscription tx-sender creator-id)
+          subscription 
             (begin
-                (var-set next-subscription-id (- (var-get next-subscription-id) u1))
-                (ok (map-delete subscriptions { subscriber: tx-sender, creator-id: creator-id })))
-        (err err-not-subscribed)))
+              (var-set next-subscription-id (- (var-get next-subscription-id) u1))
+              (map-delete subscriptions { subscriber: tx-sender, creator-id: creator-id })
+              (ok (tuple (status "subscription cancelled") (creator-id creator-id))))
+          (err err-not-subscribed))
+        (err err-not-found))
+  )
+)
 
 (define-public (renew-subscription (creator-id uint))
-    (match (map-get? subscriptions { subscriber: tx-sender, creator-id: creator-id })
-        subscription
+  (begin
+    ;; Check if creator exists
+    (if (creator-exists creator-id)
+        ;; Check if subscription exists
+        (match (get-subscription tx-sender creator-id)
+          subscription
             (begin
-                ;; Check if the current block height is past the expiration
-                (if (>= block-height (get expiration subscription))
-                    (begin
-                        ;; Renew the subscription by extending the expiration
-                        (map-set subscriptions { subscriber: tx-sender, creator-id: creator-id }
-                            { expiration: (+ block-height subscription-duration) })
-                        (ok (get expiration subscription)))
-                    (err err-already-subscribed))  ;; If subscription is still active
+              ;; Check if the current block height is past the expiration
+              (if (>= block-height (get expiration subscription))
+                  (begin
+                    ;; Renew the subscription by extending the expiration
+                    (map-set subscriptions { subscriber: tx-sender, creator-id: creator-id }
+                        { expiration: (+ block-height subscription-duration), auto-renew: (get auto-renew subscription) })
+                    (ok (tuple (status "subscription renewed") (creator-id creator-id))))
+                  (err err-already-subscribed))  ;; If subscription is still active
             )
-        (err err-not-subscribed)))
+          (err err-not-subscribed))
+        (err err-not-found))
+  )
+)
+
+;; Enable auto-renew for a subscription
+(define-public (enable-auto-renew (creator-id uint))
+  (begin
+    ;; Check if creator exists
+    (if (creator-exists creator-id)
+        ;; Check if subscription exists
+        (match (get-subscription tx-sender creator-id)
+          subscription
+            (begin
+              ;; Set auto-renew to true
+              (map-set subscriptions { subscriber: tx-sender, creator-id: creator-id }
+                  (merge subscription { auto-renew: true }))
+              (ok (tuple (status "auto-renew enabled") (creator-id creator-id)))
+            )
+          (err err-not-subscribed))
+        (err err-not-found))
+  )
+)
